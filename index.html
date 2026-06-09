@@ -1,0 +1,762 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Home, Map, Droplets, Tractor, Navigation, 
+  Plus, MapPin, Camera, Save, LogOut, User, Lock, 
+  Search, ChevronRight, Activity, AlertCircle, 
+  FileSpreadsheet, Edit, Trash2, Building
+} from 'lucide-react';
+
+const KECAMATAN_LIST = [
+  "Dawe", "Gebog", "Kaliwungu", "Jekulo", "Undaan", "Mejobo", "Kota", "Bae", "Jati"
+];
+
+const SUMBER_ANGGARAN = [
+  "APBN", "APBD Provinsi", "APBD Kabupaten", "DAK", "Lainnya"
+];
+
+const ALSINTAN_CATEGORIES = [
+  "Traktor Roda 2", "Traktor Roda 4", "Pompa Air", "Combine Harvester", "Cultivator", "Rotavator", "Rice Transplanter", "PTM", "Lainnya"
+];
+
+const BANGUNAN_CATEGORIES = [
+  "Dam Parit", "Embung", "Pintu Air", "Lainnya"
+];
+
+const mockData = {
+  jaringan_irigasi: [
+    { id: 'JI-001', nama: 'Irigasi Subak Makmur', poktan: 'Tani Makmur', desa: 'Undaan Lor', kecamatan: 'Undaan', lat: '-6.830000', lng: '110.840000', luas: 15, panjang: 500, sumber_anggaran: 'DAK', status: 'Baik', foto_url: 'https://images.unsplash.com/photo-1589923158776-cb4485d99fd6?auto=format&fit=crop&w=500&q=80' },
+  ],
+  irpom_irpip: [
+    { id: 'IP-001', nama: 'Pompa Air Kelompok Tani A', poktan: 'Tani Jaya', desa: 'Gondosari', kecamatan: 'Gebog', lat: '-6.810000', lng: '110.900000', jenis: 'Irpom', panjang: 150, sumber_anggaran: 'APBN', status: 'Baik', foto_url: 'https://images.unsplash.com/photo-1581093458791-9f3c3900df4b?auto=format&fit=crop&w=500&q=80' },
+  ],
+  jalan_usaha_tani: [
+    { id: 'JU-001', nama: 'JUT Suka Maju', poktan: 'Tani Sentosa', desa: 'Cendono', kecamatan: 'Dawe', lat: '-6.750000', lng: '110.880000', panjang: 1200, sumber_anggaran: 'APBD Provinsi', status: 'Sedang Dibangun', foto_url: 'https://images.unsplash.com/photo-1590682680695-43b964a3ae17?auto=format&fit=crop&w=500&q=80' },
+  ],
+  bangunan_konvensional: [
+    { id: 'BK-001', nama: 'Dam Parit Desa Mejobo', jenis_bangunan: 'Dam Parit', poktan: 'Maju Jaya', desa: 'Mejobo', kecamatan: 'Mejobo', lat: '-6.840000', lng: '110.870000', sumber_anggaran: 'APBD Kabupaten', status: 'Baik', foto_url: 'https://images.unsplash.com/photo-1543872084-c7bd3822856f?auto=format&fit=crop&w=500&q=80' },
+  ],
+  alsintan: [
+    { id: 'AL-001', nama: 'Traktor Roda 4 Kubota', kategori: 'Traktor Roda 4', poktan: 'Tani Makmur', desa: 'Mejobo', kecamatan: 'Mejobo', lat: '-6.840000', lng: '110.870000', sumber_anggaran: 'DAK', status: 'Baik', foto_url: 'https://images.unsplash.com/photo-1592982537447-6f29cf39bb00?auto=format&fit=crop&w=500&q=80' },
+  ]
+};
+
+const exportToCSV = (data, filename) => {
+  if (!data || !data.length) return alert('Tidak ada data untuk diunduh');
+  const headers = Object.keys(data[0]).join(',');
+  const csv = [
+    headers, 
+    ...data.map(row => Object.values(row).map(val => `"${val || ''}"`).join(','))
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.setAttribute('href', URL.createObjectURL(blob));
+  link.setAttribute('download', `${filename}.csv`);
+  link.click();
+};
+
+const Toast = ({ message, type, onClose }) => {
+  if (!message) return null;
+  return (
+    <div className={`fixed top-4 right-4 z-50 flex items-center p-4 rounded-xl shadow-2xl text-white transform transition-all duration-300 ${type === 'error' ? 'bg-red-500' : 'bg-green-600'}`}>
+      {type === 'error' ? <AlertCircle className="w-5 h-5 mr-3" /> : <Save className="w-5 h-5 mr-3" />}
+      <span className="font-medium">{message}</span>
+      <button onClick={onClose} className="ml-6 text-white/80 hover:text-white font-bold">✕</button>
+    </div>
+  );
+};
+
+export default function App() {
+  const [user, setUser] = useState(null); 
+  const [currentView, setCurrentView] = useState('dashboard');
+  const [activeFormCategory, setActiveFormCategory] = useState('');
+  const [db, setDb] = useState(mockData);
+  const [toast, setToast] = useState({ message: '', type: '' });
+  
+  const [editingData, setEditingData] = useState(null);
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, item: null, category: '' });
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast({ message: '', type: '' }), 4000);
+  };
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    const username = e.target.username.value;
+    const password = e.target.password.value;
+    if (username === 'admin' && password === 'admin123') {
+      setUser({ username: 'Admin Dinas', role: 'admin' });
+      showToast('Login berhasil sebagai Admin');
+    } else {
+      showToast('Username/Password Admin salah!', 'error');
+    }
+  };
+
+  const confirmDelete = () => {
+    const { item, category } = deleteModal;
+    setDb(prev => ({
+      ...prev,
+      [category]: prev[category].filter(x => x.id !== item.id)
+    }));
+    showToast('Data berhasil dihapus');
+    setDeleteModal({ isOpen: false, item: null, category: '' });
+  };
+
+  const navigateToView = (category) => {
+    const viewMap = {
+      'jaringan_irigasi': 'irigasi',
+      'irpom_irpip': 'irpom',
+      'jalan_usaha_tani': 'jut',
+      'bangunan_konvensional': 'bangunan',
+      'alsintan': 'alsintan'
+    };
+    setCurrentView(viewMap[category] || 'dashboard');
+  };
+
+  const handleSaveData = (newData) => {
+    setDb(prev => {
+      const currentList = prev[activeFormCategory] || [];
+      const isEditing = currentList.some(item => item.id === newData.id);
+      
+      if (isEditing) {
+        return { ...prev, [activeFormCategory]: currentList.map(item => item.id === newData.id ? newData : item) };
+      } else {
+        return { ...prev, [activeFormCategory]: [...currentList, newData] };
+      }
+    });
+    
+    showToast(editingData ? 'Data berhasil diperbarui!' : 'Data berhasil ditambahkan!');
+    setEditingData(null);
+    navigateToView(activeFormCategory);
+  };
+
+  if (!user) {
+    return (
+      <div 
+        className="min-h-screen flex items-center justify-center relative px-4"
+        style={{ backgroundImage: "url('https://images.unsplash.com/photo-1500937386664-56d1dfef3854?ixlib=rb-4.0.3&auto=format&fit=crop&w=1920&q=80')", backgroundSize: 'cover', backgroundPosition: 'center' }}
+      >
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+        
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl overflow-hidden border border-gray-100 relative z-10">
+          <div className="bg-gradient-to-r from-green-700 to-green-600 p-8 text-center relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
+            <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/06/Logo_of_the_Ministry_of_Agriculture_of_the_Republic_of_Indonesia.svg/512px-Logo_of_the_Ministry_of_Agriculture_of_the_Republic_of_Indonesia.svg.png" alt="Logo Kementan" className="w-20 h-20 mx-auto mb-3 relative z-10 object-contain drop-shadow-md" />
+            <h1 className="text-2xl font-bold text-white relative z-10">SIM SARPRAS TANI</h1>
+            <p className="text-green-100 mt-2 text-sm relative z-10">Sistem Informasi Sarana & Prasarana Pertanian</p>
+          </div>
+          <form onSubmit={handleLogin} className="p-8 space-y-5">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Username Admin</label>
+              <div className="relative">
+                <User className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                <input name="username" type="text" className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 outline-none transition" placeholder="Username admin" required />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                <input name="password" type="password" className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 outline-none transition" placeholder="Masukkan password" required />
+              </div>
+            </div>
+            <button type="submit" className="w-full bg-green-600 text-white font-bold py-3.5 rounded-xl hover:bg-green-700 shadow-lg hover:shadow-xl transition-all mt-4">
+              Masuk Sebagai Admin
+            </button>
+            
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-gray-200"></div>
+              <span className="flex-shrink-0 mx-4 text-gray-400 text-xs font-semibold">ATAU</span>
+              <div className="flex-grow border-t border-gray-200"></div>
+            </div>
+
+            <button type="button" onClick={() => { setUser({username: 'Tamu', role: 'tamu'}); showToast('Berhasil masuk sebagai Tamu'); }} className="w-full bg-gray-50 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-100 transition-all border border-gray-200">
+              Masuk Sebagai Tamu (Tanpa Sandi)
+            </button>
+          </form>
+        </div>
+        <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: '', type: '' })} />
+      </div>
+    );
+  }
+
+  const getStats = () => ({
+    irigasi: db.jaringan_irigasi?.length || 0,
+    irpom: db.irpom_irpip?.length || 0,
+    jut: db.jalan_usaha_tani?.length || 0,
+    bangunan: db.bangunan_konvensional?.length || 0,
+    alsintan: db.alsintan?.length || 0,
+  });
+
+  return (
+    <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row font-sans">
+      <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: '', type: '' })} />
+      
+      {/* Desktop Sidebar */}
+      <aside className="hidden md:flex flex-col w-64 bg-green-800 text-white min-h-screen shadow-xl z-20">
+        <div className="p-6 border-b border-green-700">
+          <h2 className="text-xl font-bold flex items-center"><Tractor className="mr-2" /> SIM Sarpras</h2>
+          <p className="text-xs text-green-300 mt-1 uppercase tracking-wider font-semibold">Dinas Pertanian</p>
+        </div>
+        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+          <NavItem icon={<Activity size={20} />} label="Dashboard" isActive={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')} />
+          <NavItem icon={<Droplets size={20} />} label="Jaringan Irigasi" isActive={currentView === 'irigasi'} onClick={() => setCurrentView('irigasi')} />
+          <NavItem icon={<Map size={20} />} label="Irpom & Irpip" isActive={currentView === 'irpom'} onClick={() => setCurrentView('irpom')} />
+          <NavItem icon={<Navigation size={20} />} label="Jalan Usaha Tani" isActive={currentView === 'jut'} onClick={() => setCurrentView('jut')} />
+          <NavItem icon={<Building size={20} />} label="Bangunan" isActive={currentView === 'bangunan'} onClick={() => setCurrentView('bangunan')} />
+          <NavItem icon={<Tractor size={20} />} label="Alsintan" isActive={currentView === 'alsintan'} onClick={() => setCurrentView('alsintan')} />
+        </nav>
+        <div className="p-4 border-t border-green-700 bg-green-900/30">
+          <div className="flex items-center mb-4">
+            <div className="w-10 h-10 rounded-full bg-green-600 flex items-center justify-center mr-3 font-bold shadow-inner">{user.username.charAt(0)}</div>
+            <div>
+              <p className="text-sm font-bold">{user.username}</p>
+              <p className="text-xs text-green-300 capitalize">{user.role}</p>
+            </div>
+          </div>
+          <button onClick={() => setUser(null)} className="w-full flex items-center justify-center py-2.5 bg-red-500/90 hover:bg-red-500 rounded-lg text-sm font-bold transition shadow-sm">
+            <LogOut className="w-4 h-4 mr-2" /> Logout
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col h-screen overflow-hidden">
+        {/* Mobile Header */}
+        <header className="md:hidden bg-green-700 text-white p-4 flex justify-between items-center shadow-md z-10">
+          <h1 className="font-bold flex items-center"><Tractor className="w-5 h-5 mr-2" /> SIM Sarpras</h1>
+          <button onClick={() => setUser(null)} className="p-2 bg-green-800 rounded-lg"><LogOut className="w-5 h-5" /></button>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8 bg-gray-50">
+          {currentView === 'dashboard' && <Dashboard stats={getStats()} navigate={setCurrentView} db={db} />}
+          
+          {['irigasi', 'irpom', 'jut', 'bangunan', 'alsintan'].includes(currentView) && (
+            <DataList 
+              title={
+                currentView === 'irigasi' ? 'Jaringan Irigasi' : 
+                currentView === 'irpom' ? 'Irpom & Irpip' : 
+                currentView === 'jut' ? 'Jalan Usaha Tani (JUT)' :
+                currentView === 'bangunan' ? 'Bangunan Konvensional' : 'Alat Mesin Pertanian (Alsintan)'
+              }
+              category={
+                currentView === 'irigasi' ? 'jaringan_irigasi' : 
+                currentView === 'irpom' ? 'irpom_irpip' : 
+                currentView === 'jut' ? 'jalan_usaha_tani' :
+                currentView === 'bangunan' ? 'bangunan_konvensional' : 'alsintan'
+              }
+              data={db[currentView === 'irigasi' ? 'jaringan_irigasi' : currentView === 'irpom' ? 'irpom_irpip' : currentView === 'jut' ? 'jalan_usaha_tani' : currentView === 'bangunan' ? 'bangunan_konvensional' : 'alsintan']} 
+              user={user} 
+              navigate={setCurrentView} 
+              setActiveForm={(cat) => { setActiveFormCategory(cat); setEditingData(null); }}
+              onEdit={(item, cat) => { setActiveFormCategory(cat); setEditingData(item); setCurrentView('form'); }}
+              onDelete={(item, cat) => setDeleteModal({ isOpen: true, item, category: cat })}
+            />
+          )}
+
+          {currentView === 'form' && (
+            <DataForm 
+              category={activeFormCategory} 
+              initialData={editingData}
+              onBack={() => navigateToView(activeFormCategory)}
+              onSave={handleSaveData}
+            />
+          )}
+        </div>
+      </main>
+
+      {/* Delete Modal */}
+      {deleteModal.isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <h3 className="text-xl font-bold text-gray-800 mb-2">Konfirmasi Hapus</h3>
+            <p className="text-gray-600 text-sm mb-6">Apakah Anda yakin ingin menghapus data <b>{deleteModal.item?.nama}</b>? Tindakan ini tidak dapat dibatalkan.</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setDeleteModal({ isOpen: false, item: null, category: '' })} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition">Batal</button>
+              <button onClick={confirmDelete} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl transition">Hapus Data</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Nav */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t flex justify-between px-2 py-2 shadow-[0_-5px_15px_rgba(0,0,0,0.05)] z-50">
+        <BottomNavItem icon={<Activity size={20} />} label="Dash" isActive={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')} />
+        <BottomNavItem icon={<Droplets size={20} />} label="Irigasi" isActive={currentView === 'irigasi'} onClick={() => setCurrentView('irigasi')} />
+        <BottomNavItem icon={<Map size={20} />} label="Irpom" isActive={currentView === 'irpom'} onClick={() => setCurrentView('irpom')} />
+        <BottomNavItem icon={<Building size={20} />} label="Bangunan" isActive={currentView === 'bangunan'} onClick={() => setCurrentView('bangunan')} />
+        <BottomNavItem icon={<Tractor size={20} />} label="Alsintan" isActive={currentView === 'alsintan'} onClick={() => setCurrentView('alsintan')} />
+      </nav>
+    </div>
+  );
+}
+
+// === KOMPONEN DASHBOARD ===
+function Dashboard({ stats, navigate, db }) {
+  // Mengumpulkan dan memfilter semua item yang memiliki koordinat Latitude & Longitude valid
+  const allData = [
+    ...(db?.jaringan_irigasi || []),
+    ...(db?.irpom_irpip || []),
+    ...(db?.jalan_usaha_tani || []),
+    ...(db?.bangunan_konvensional || []),
+    ...(db?.alsintan || [])
+  ].filter(item => item.lat && item.lng && !isNaN(parseFloat(item.lat)));
+
+  useEffect(() => {
+    let myMap = null;
+
+    const initMap = () => {
+      if (!window.L) return;
+      const container = document.getElementById('map-container');
+      if (!container || container._leaflet_id) return;
+
+      // Pusat Peta (default di sekitar koordinat Kabupaten Kudus/Demak)
+      myMap = window.L.map('map-container').setView([-6.8, 110.85], 11);
+
+      // Layer Satelit (Esri World Imagery - Mirip Google Earth)
+      window.L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+          attribution: 'Tiles &copy; Esri &mdash; Source: Esri'
+      }).addTo(myMap);
+
+      // Layer Label (Nama Jalan/Desa/Kota) agar mudah dikenali
+      window.L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', {
+          attribution: '&copy; CartoDB',
+          subdomains: 'abcd',
+          maxZoom: 20
+      }).addTo(myMap);
+
+      // Tambahkan Pin/Marker interaktif untuk setiap data
+      allData.forEach(item => {
+         if(item.lat && item.lng) {
+           const marker = window.L.marker([parseFloat(item.lat), parseFloat(item.lng)]).addTo(myMap);
+           marker.bindPopup(`
+             <div style="font-family: sans-serif; min-width: 150px;">
+               <h4 style="margin:0; font-weight:bold; color:#166534; font-size: 14px;">${item.nama}</h4>
+               <p style="margin:4px 0 0 0; font-size:12px; font-weight: 500;">Ds. ${item.desa}</p>
+               <p style="margin:0; font-size:11px; color:#666;">${item.kategori || item.jenis || item.jenis_bangunan || 'Infrastruktur'}</p>
+             </div>
+           `);
+         }
+      });
+    };
+
+    // Inject library pemetaan Leaflet secara dinamis
+    if (!document.getElementById('leaflet-css')) {
+      const link = document.createElement('link');
+      link.id = 'leaflet-css';
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(link);
+    }
+
+    if (!document.getElementById('leaflet-js')) {
+      const script = document.createElement('script');
+      script.id = 'leaflet-js';
+      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      script.async = true;
+      script.onload = initMap;
+      document.head.appendChild(script);
+    } else {
+      if (window.L) initMap();
+      else document.getElementById('leaflet-js').addEventListener('load', initMap);
+    }
+
+    return () => {
+      if (myMap) {
+        myMap.remove();
+        const container = document.getElementById('map-container');
+        if(container) container._leaflet_id = null;
+      }
+    };
+  }, [allData]);
+
+  return (
+    <div className="space-y-6 max-w-7xl mx-auto">
+      <h2 className="text-2xl font-bold text-gray-800 mb-6">Dashboard Statistik</h2>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <StatCard icon={<Droplets size={24} />} title="Jaringan Irigasi" value={stats.irigasi} desc="Saluran & Irigasi" color="bg-blue-500" onClick={() => navigate('irigasi')} />
+        <StatCard icon={<Map size={24} />} title="Irpom & Irpip" value={stats.irpom} desc="Pompa & Perpipaan" color="bg-cyan-500" onClick={() => navigate('irpom')} />
+        <StatCard icon={<Navigation size={24} />} title="Jalan Usaha Tani" value={stats.jut} desc="Akses Transportasi" color="bg-orange-500" onClick={() => navigate('jut')} />
+        <StatCard icon={<Building size={24} />} title="Bangunan" value={stats.bangunan} desc="Konvensional Air" color="bg-purple-500" onClick={() => navigate('bangunan')} />
+        <StatCard icon={<Tractor size={24} />} title="Alsintan" value={stats.alsintan} desc="Alat Mesin Pertanian" color="bg-green-600" onClick={() => navigate('alsintan')} />
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mt-6">
+        <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center"><MapPin className="mr-2 text-green-600" /> Peta Sebaran Sarpras (Satelit Bumi)</h3>
+        <div id="map-container" className="w-full h-[450px] rounded-xl border border-gray-300 relative z-0 shadow-inner overflow-hidden">
+           {/* Peta Satelit Interaktif Leaflet akan dimuat ke dalam div ini */}
+           {allData.length === 0 && (
+             <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-[1000]">
+               <Map className="w-12 h-12 text-gray-400 mb-2" />
+               <p className="text-gray-500 font-medium">Belum ada titik koordinat GPS yang terekam.</p>
+             </div>
+           )}
+        </div>
+        <p className="text-xs text-gray-500 mt-3 text-center">* Peta menggunakan teknologi satelit interaktif nyata. Anda bisa menggeser (drag), zoom in/out, dan mengklik pin penanda sarpras.</p>
+      </div>
+
+      {/* GALERI DOKUMENTASI FOTO */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mt-6">
+        <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center"><Camera className="mr-2 text-green-600" /> Galeri Dokumentasi Lapangan</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {allData.filter(item => item.foto_url).map((item, idx) => (
+            <div key={idx} className="border border-gray-100 rounded-xl overflow-hidden group hover:shadow-md transition bg-gray-50 cursor-pointer" onClick={() => navigate(item.kategori ? 'alsintan' : item.jenis ? 'irpom' : item.jenis_bangunan ? 'bangunan' : item.panjang > 500 ? 'jut' : 'irigasi')}>
+              <div className="relative h-32 overflow-hidden bg-gray-200 border-b border-gray-100">
+                <img src={item.foto_url} alt={item.nama} className="w-full h-full object-cover group-hover:scale-110 transition duration-500" />
+                <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">
+                  {item.kategori || item.jenis || item.jenis_bangunan || 'Umum'}
+                </div>
+              </div>
+              <div className="p-3">
+                <p className="text-sm font-bold text-gray-800 truncate" title={item.nama}>{item.nama}</p>
+                <p className="text-xs text-gray-500 flex items-center mt-1"><MapPin className="w-3 h-3 mr-1"/> Ds. {item.desa}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        {allData.filter(item => item.foto_url).length === 0 && (
+          <div className="text-center py-10 text-gray-500 text-sm bg-gray-50 rounded-xl border border-dashed border-gray-200">
+            <Camera className="w-8 h-8 mx-auto text-gray-400 mb-2" />
+            Belum ada dokumentasi foto yang diunggah.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// === KOMPONEN DATA LIST ===
+function DataList({ title, data, category, user, navigate, setActiveForm, onEdit, onDelete }) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterCat, setFilterCat] = useState('');
+
+  const filteredData = data.filter(item => {
+    const matchSearch = Object.values(item).some(val => 
+      String(val).toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    const matchCat = filterCat === '' || item.kategori === filterCat || item.jenis_bangunan === filterCat;
+    return matchSearch && matchCat;
+  });
+
+  return (
+    <div className="space-y-6 max-w-7xl mx-auto">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+        <h2 className="text-xl font-bold text-gray-800">{title}</h2>
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <div className="relative flex-1 md:w-64">
+            <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+            <input 
+              type="text" placeholder="Cari data..." 
+              className="w-full pl-9 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+              value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+          {category === 'alsintan' && (
+            <select className="px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" value={filterCat} onChange={(e) => setFilterCat(e.target.value)}>
+              <option value="">Semua Kategori</option>
+              {ALSINTAN_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+          <button onClick={() => exportToCSV(filteredData, title)} className="flex items-center px-3 py-2 bg-blue-50 text-blue-600 font-semibold text-sm rounded-lg hover:bg-blue-100 border border-blue-100">
+            <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Excel
+          </button>
+          {user.role === 'admin' && (
+            <button onClick={() => { setActiveForm(category); navigate('form'); }} className="flex items-center px-4 py-2 bg-green-600 text-white font-semibold text-sm rounded-lg hover:bg-green-700 shadow-sm">
+              <Plus className="w-4 h-4 mr-1" /> Tambah
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        {/* Desktop Table */}
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-gray-50 text-gray-600 font-semibold border-b">
+              <tr>
+                <th className="px-6 py-4">Informasi Utama</th>
+                <th className="px-6 py-4">Wilayah & Poktan</th>
+                <th className="px-6 py-4">Spesifikasi & Kordinat</th>
+                <th className="px-6 py-4">Status & Anggaran</th>
+                {user.role === 'admin' && <th className="px-6 py-4 text-right">Aksi</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredData.map((item, idx) => (
+                <tr key={idx} className="hover:bg-gray-50">
+                  <td className="px-6 py-4">
+                    <p className="font-bold text-gray-800">{item.nama}</p>
+                    <p className="text-xs text-gray-400 font-mono mt-0.5">{item.id}</p>
+                  </td>
+                  <td className="px-6 py-4">
+                    <p className="font-semibold text-gray-800">{item.poktan}</p>
+                    <p className="text-xs text-gray-500 mt-1">Ds. {item.desa}, Kec. {item.kecamatan}</p>
+                  </td>
+                  <td className="px-6 py-4 text-gray-600">
+                    <div className="text-xs font-mono mb-1">GPS: {item.lat}, {item.lng}</div>
+                    {item.luas && <div>Luas: <span className="font-semibold">{item.luas} Ha</span></div>}
+                    {item.panjang && <div>Panjang: <span className="font-semibold">{item.panjang} M</span></div>}
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="mb-2"><span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-semibold">{item.sumber_anggaran}</span></div>
+                    <span className={`px-2 py-1 rounded-full text-xs font-bold ${item.status === 'Baik' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{item.status}</span>
+                  </td>
+                  {user.role === 'admin' && (
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => onEdit(item, category)} className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg"><Edit className="w-4 h-4"/></button>
+                        <button onClick={() => onDelete(item, category)} className="p-2 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {filteredData.length === 0 && <tr><td colSpan="5" className="text-center py-10 text-gray-500">Tidak ada data.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Mobile View */}
+        <div className="md:hidden divide-y divide-gray-100">
+          {filteredData.map((item, idx) => (
+            <div key={idx} className="p-4 space-y-3 hover:bg-gray-50">
+              <div className="flex justify-between items-start gap-2">
+                <div><h3 className="font-bold text-gray-800">{item.nama}</h3><p className="text-xs text-gray-400 font-mono">{item.id}</p></div>
+                <span className={`shrink-0 px-2 py-1 rounded text-[10px] font-bold ${item.status === 'Baik' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{item.status}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5 text-[11px] font-medium">
+                <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded">Ds. {item.desa}</span>
+                <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded font-mono">Lat: {item.lat}</span>
+                <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded font-mono">Lng: {item.lng}</span>
+              </div>
+              {user.role === 'admin' && (
+                <div className="flex justify-end gap-2 pt-2 border-t">
+                  <button onClick={() => onEdit(item, category)} className="flex items-center px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-lg"><Edit className="w-3 h-3 mr-1"/> Edit</button>
+                  <button onClick={() => onDelete(item, category)} className="flex items-center px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 rounded-lg"><Trash2 className="w-3 h-3 mr-1"/> Hapus</button>
+                </div>
+              )}
+            </div>
+          ))}
+          {filteredData.length === 0 && <div className="text-center py-8 text-gray-500 text-sm">Tidak ada data.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// === KOMPONEN FORMULIR INPUT ===
+function DataForm({ category, onBack, onSave, initialData }) {
+  const [formData, setFormData] = useState(initialData || {
+    id: `ID-${Math.floor(Math.random() * 10000)}`,
+    nama: '', poktan: '', desa: '', kecamatan: '', 
+    lat: '', lng: '', status: 'Baik', sumber_anggaran: 'APBN',
+    kategori: 'Traktor Roda 2', jenis: 'Irpom', jenis_bangunan: 'Dam Parit',
+    luas: '', panjang: '', fotoName: ''
+  });
+  const [isLocating, setIsLocating] = useState(false);
+
+  const handleGetLocation = (e) => {
+    e.preventDefault();
+    setIsLocating(true);
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setFormData(prev => ({ 
+            ...prev, 
+            lat: pos.coords.latitude.toFixed(6), 
+            lng: pos.coords.longitude.toFixed(6) 
+          }));
+          setIsLocating(false);
+        },
+        () => { alert("Gagal GPS. Pastikan izin lokasi browser aktif."); setIsLocating(false); }
+      );
+    } else { alert("Browser tidak mendukung GPS."); setIsLocating(false); }
+  };
+
+  const handleFileChange = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      // Membaca file gambar dan membuat URL preview lokal agar langsung tampil di Dashboard
+      const previewUrl = URL.createObjectURL(file);
+      setFormData(prev => ({ 
+        ...prev, 
+        fotoName: file.name,
+        foto_url: previewUrl // Menyimpan URL preview ke dalam state
+      }));
+    }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!formData.nama || !formData.desa || !formData.lat || !formData.lng) {
+      alert("Harap lengkapi semua isian Wajib (termasuk Latitude & Longitude)!");
+      return;
+    }
+    // Eksekusi fungsi simpan dari parent <App />
+    onSave(formData); 
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-xl border border-gray-100 p-6 md:p-10">
+      <div className="flex items-center justify-between mb-8 pb-4 border-b border-gray-100">
+        <h2 className="text-2xl font-bold text-gray-800">{initialData ? 'Edit Data' : 'Form Input Data Baru'}</h2>
+        <button type="button" onClick={onBack} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-bold transition">Batal / Kembali</button>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-8">
+        <div>
+          <h3 className="text-sm font-bold text-green-700 uppercase tracking-wider mb-4">Informasi Dasar</h3>
+          <div className="grid md:grid-cols-2 gap-5">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Nama Sarpras/Alsintan *</label>
+              <input type="text" required className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-green-500 outline-none" value={formData.nama} onChange={e => setFormData({...formData, nama: e.target.value})} placeholder="Cth: Traktor Kelompok Maju" />
+            </div>
+            {category === 'alsintan' && (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Kategori Alat *</label>
+                <select className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-green-500 outline-none" value={formData.kategori} onChange={e => setFormData({...formData, kategori: e.target.value})}>
+                  {ALSINTAN_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            )}
+            {category === 'irpom_irpip' && (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Jenis Irigasi *</label>
+                <select className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-green-500 outline-none" value={formData.jenis} onChange={e => setFormData({...formData, jenis: e.target.value})}>
+                  <option value="Irpom">Irigasi Pompa (Irpom)</option>
+                  <option value="Irpip">Irigasi Perpipaan (Irpip)</option>
+                </select>
+              </div>
+            )}
+            {category === 'bangunan_konvensional' && (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Jenis Bangunan *</label>
+                <select className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-green-500 outline-none" value={formData.jenis_bangunan} onChange={e => setFormData({...formData, jenis_bangunan: e.target.value})}>
+                  {BANGUNAN_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            )}
+            {(category === 'jaringan_irigasi') && (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Luas Layanan (Hektar) *</label>
+                <input type="number" required className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-green-500 outline-none" value={formData.luas} onChange={e => setFormData({...formData, luas: e.target.value})} />
+              </div>
+            )}
+            {(category === 'jalan_usaha_tani' || category === 'jaringan_irigasi' || category === 'irpom_irpip') && (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Panjang (Meter) *</label>
+                <input type="number" required className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-green-500 outline-none" value={formData.panjang} onChange={e => setFormData({...formData, panjang: e.target.value})} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <h3 className="text-sm font-bold text-green-700 uppercase tracking-wider mb-4">Lokasi & Penerima</h3>
+          <div className="grid md:grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Kecamatan *</label>
+              <select required className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-green-500 outline-none" value={formData.kecamatan} onChange={e => setFormData({...formData, kecamatan: e.target.value})}>
+                <option value="">-- Pilih --</option>
+                {KECAMATAN_LIST.map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Nama Desa *</label>
+              <input type="text" required className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-green-500 outline-none" value={formData.desa} onChange={e => setFormData({...formData, desa: e.target.value})} placeholder="Cth: Undaan Lor" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Nama Kelompok Tani (Poktan) *</label>
+              <input type="text" required className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-green-500 outline-none" value={formData.poktan} onChange={e => setFormData({...formData, poktan: e.target.value})} placeholder="Cth: Tani Makmur Sejahtera" />
+            </div>
+          </div>
+        </div>
+
+        {/* KOORDINAT (Kini bisa di-edit manual & otomatis GPS) */}
+        <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200">
+          <h3 className="text-sm font-bold text-gray-800 mb-4 flex items-center"><MapPin className="w-4 h-4 mr-2 text-red-500"/> Koordinat Geospasial (Wajib)</h3>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Latitude</label>
+              <input type="text" className="w-full bg-white border border-gray-300 rounded-lg p-2.5 font-mono text-sm text-center focus:border-green-500 focus:ring-1 focus:ring-green-500" value={formData.lat} onChange={(e) => setFormData({...formData, lat: e.target.value})} placeholder="-6.123456" required />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">Longitude</label>
+              <input type="text" className="w-full bg-white border border-gray-300 rounded-lg p-2.5 font-mono text-sm text-center focus:border-green-500 focus:ring-1 focus:ring-green-500" value={formData.lng} onChange={(e) => setFormData({...formData, lng: e.target.value})} placeholder="110.123456" required />
+            </div>
+          </div>
+          <button type="button" onClick={handleGetLocation} disabled={isLocating} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition flex justify-center items-center shadow-md">
+            {isLocating ? 'Melacak GPS...' : <><Navigation className="w-5 h-5 mr-2" /> Ambil Koordinat GPS Saat Ini</>}
+          </button>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-5">
+           <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Sumber Anggaran *</label>
+              <select className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-green-500 outline-none" value={formData.sumber_anggaran} onChange={e => setFormData({...formData, sumber_anggaran: e.target.value})}>
+                {SUMBER_ANGGARAN.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Kondisi Status *</label>
+              <select className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 focus:ring-2 focus:ring-green-500 outline-none" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
+                <option value="Baik">Baik</option>
+                <option value="Rusak Ringan">Rusak Ringan</option>
+                <option value="Rusak Berat">Rusak Berat</option>
+                <option value="Sedang Dibangun">Sedang Dibangun</option>
+              </select>
+            </div>
+        </div>
+
+        {/* INPUT FOTO */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Dokumentasi Foto Lapangan</label>
+          <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 flex flex-col items-center justify-center bg-gray-50 hover:bg-gray-100 cursor-pointer relative transition">
+            <input type="file" accept="image/*" capture="environment" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+            <Camera className={`w-8 h-8 mb-2 ${formData.fotoName ? 'text-green-500' : 'text-gray-400'}`} />
+            <span className="text-sm text-gray-600 font-bold">
+              {formData.fotoName ? `File terpilih: ${formData.fotoName}` : 'Tap untuk Foto / Pilih File'}
+            </span>
+            {!formData.fotoName && <span className="text-xs text-gray-400 mt-1">Gunakan HP untuk langsung memotret</span>}
+          </div>
+        </div>
+
+        {/* TOMBOL SIMPAN */}
+        <button type="submit" className="w-full py-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-extrabold shadow-xl mt-8 transition text-lg flex items-center justify-center">
+          <Save className="w-6 h-6 mr-2" /> Simpan Data ke Sistem
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// === KOMPONEN UTILS ===
+function NavItem({ icon, label, isActive, onClick }) {
+  return (
+    <button onClick={onClick} className={`w-full flex items-center px-4 py-3 rounded-xl transition font-medium ${isActive ? 'bg-green-600 text-white shadow-md' : 'text-green-100 hover:bg-green-700/50'}`}>
+      <span className="mr-3">{icon}</span>
+      <span>{label}</span>
+      {isActive && <ChevronRight className="w-4 h-4 ml-auto opacity-70" />}
+    </button>
+  );
+}
+
+function BottomNavItem({ icon, label, isActive, onClick }) {
+  return (
+    <button onClick={onClick} className={`flex flex-col items-center justify-center w-full py-2 rounded-lg transition ${isActive ? 'text-green-600 bg-green-50' : 'text-gray-400 hover:bg-gray-50'}`}>
+      <span className="mb-1">{icon}</span>
+      <span className="font-bold text-[10px] uppercase tracking-wider">{label}</span>
+    </button>
+  );
+}
+
+function StatCard({ icon, title, value, desc, color, onClick }) {
+  return (
+    <div onClick={onClick} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
+      <div className={`w-12 h-12 ${color} text-white rounded-xl flex items-center justify-center mb-4 shadow-sm`}>{icon}</div>
+      <h3 className="text-gray-500 text-xs font-bold uppercase tracking-wider">{title}</h3>
+      <p className="text-3xl font-extrabold text-gray-800 mt-1">{value}</p>
+      <p className="text-xs text-gray-400 mt-2 font-medium leading-relaxed">{desc}</p>
+    </div>
+  );
+}
